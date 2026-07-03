@@ -1,0 +1,1034 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 图片暗水印去除工具</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #0f0f0f;
+    color: #e0e0e0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    padding: 16px 24px;
+    border-bottom: 1px solid #2a2a2a;
+    display: flex; align-items: center; justify-content: space-between;
+    background: #161616;
+  }
+  header h1 { font-size: 18px; font-weight: 600; color: #fff; }
+  header .badge {
+    font-size: 12px; color: #888; background: #1e1e1e;
+    padding: 4px 10px; border-radius: 12px; border: 1px solid #333;
+  }
+  .container { display: flex; flex: 1; overflow: hidden; }
+  .panel-left {
+    width: 320px; min-width: 320px; background: #161616;
+    border-right: 1px solid #2a2a2a; padding: 20px;
+    overflow-y: auto; display: flex; flex-direction: column; gap: 16px;
+  }
+  .panel-right { flex: 1; display: flex; flex-direction: column; padding: 24px; overflow-y: auto; }
+
+  .upload-zone {
+    border: 2px dashed #3a3a3a; border-radius: 12px; padding: 24px 16px;
+    text-align: center; cursor: pointer; transition: all 0.2s;
+    background: #1a1a1a;
+  }
+  .upload-zone:hover, .upload-zone.drag-over { border-color: #6c8cff; background: #1a1f30; }
+  .upload-zone.has-image { border-style: solid; border-color: #2a5a2a; padding: 10px; }
+  .upload-zone .icon { font-size: 32px; margin-bottom: 6px; }
+  .upload-zone .hint { font-size: 13px; color: #888; }
+  .upload-zone .hint strong { color: #6c8cff; }
+  .thumb-preview { width: 100%; max-height: 120px; object-fit: contain; border-radius: 8px; }
+  .image-info { font-size: 12px; color: #666; margin-top: 4px; text-align: center; }
+
+  .section-title {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
+    color: #666; margin-bottom: 8px;
+  }
+
+  .preset-list { display: flex; flex-direction: column; gap: 8px; }
+
+  .preset-card {
+    background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 10px;
+    padding: 14px 16px; cursor: pointer; transition: all 0.15s;
+    display: flex; gap: 12px; align-items: center;
+  }
+  .preset-card:hover { border-color: #444; }
+  .preset-card.selected { border-color: #6c8cff; background: #1a1f2a; }
+
+  .preset-card .level-badge {
+    width: 40px; height: 40px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 13px; flex-shrink: 0;
+  }
+  .preset-card:nth-child(1) .level-badge { background: #1a3a1a; color: #51cf66; }
+  .preset-card:nth-child(2) .level-badge { background: #3a3a1a; color: #f0d060; }
+  .preset-card:nth-child(3) .level-badge { background: #3a1a1a; color: #ff922b; }
+  .preset-card:nth-child(4) .level-badge { background: #3a1a2a; color: #ff6b6b; }
+
+  .preset-card .info { flex: 1; min-width: 0; }
+  .preset-card .name { font-size: 14px; font-weight: 500; margin-bottom: 2px; }
+  .preset-card .methods { font-size: 11px; color: #777; }
+  .preset-card .impact {
+    font-size: 11px; margin-top: 2px;
+    display: flex; gap: 4px; align-items: center;
+  }
+  .preset-card:nth-child(1) .impact { color: #51cf66; }
+  .preset-card:nth-child(2) .impact { color: #f0d060; }
+  .preset-card:nth-child(3) .impact { color: #ff922b; }
+  .preset-card:nth-child(4) .impact { color: #ff6b6b; }
+
+  .preset-card .check {
+    width: 20px; height: 20px; border-radius: 50%; border: 2px solid #444;
+    flex-shrink: 0; transition: all 0.15s;
+  }
+  .preset-card.selected .check {
+    border-color: #6c8cff; background: #6c8cff;
+    box-shadow: inset 0 0 0 3px #1a1f2a;
+  }
+
+  .btn {
+    padding: 10px 20px; border-radius: 8px; border: none; cursor: pointer;
+    font-size: 14px; font-weight: 500; transition: all 0.15s; width: 100%;
+  }
+  .btn-primary { background: #6c8cff; color: #fff; }
+  .btn-primary:hover { background: #5a7aee; }
+  .btn-primary:disabled { background: #333; color: #666; cursor: not-allowed; }
+  .btn-secondary { background: #1e1e1e; color: #ccc; border: 1px solid #333; }
+  .btn-secondary:hover { background: #2a2a2a; }
+
+  .preview-area { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .preview-area .placeholder { color: #444; font-size: 14px; text-align: center; }
+
+  .compare-container {
+    position: relative; display: inline-block; user-select: none;
+    max-width: 100%; max-height: 100%; touch-action: none;
+  }
+  .compare-container img, .compare-container canvas {
+    display: block; max-width: 85vw; max-height: 70vh; object-fit: contain;
+  }
+  .compare-before {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    overflow: hidden;
+  }
+  .compare-slider {
+    position: absolute; top: 0; bottom: 0; width: 3px; background: #fff;
+    cursor: ew-resize; box-shadow: 0 0 8px rgba(0,0,0,0.5);
+  }
+  .compare-handle {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    width: 36px; height: 36px; border-radius: 50%; background: #fff;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.4); cursor: ew-resize;
+    touch-action: none;
+  }
+  .compare-handle svg { width: 16px; height: 16px; color: #333; }
+  .compare-labels { display: flex; justify-content: space-between; margin-top: 8px; font-size: 12px; color: #888; }
+  .compare-labels span:first-child { background: #1a1a1a; padding: 4px 12px; border-radius: 4px; color: #ff6b6b; }
+  .compare-labels span:last-child { background: #1a1a1a; padding: 4px 12px; border-radius: 4px; color: #51cf66; }
+
+  .processing-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+    display: flex; align-items: center; justify-content: center; z-index: 100;
+  }
+  .processing-box {
+    background: #1a1a1a; border: 1px solid #333; border-radius: 12px;
+    padding: 32px 48px; text-align: center;
+  }
+  .spinner {
+    width: 40px; height: 40px; border: 3px solid #333;
+    border-top-color: #6c8cff; border-radius: 50%;
+    animation: spin 0.8s linear infinite; margin: 0 auto 16px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    background: #2a2a2a; color: #e0e0e0; padding: 10px 24px; border-radius: 8px;
+    font-size: 13px; z-index: 200; border: 1px solid #444;
+    animation: toastIn 0.3s ease;
+  }
+  @keyframes toastIn { from { opacity: 0; transform: translateX(-50%) translateY(10px); } }
+
+  @media (max-width: 768px) {
+    body { min-height: 100dvh; }
+    header { padding: 12px 16px; flex-wrap: wrap; gap: 8px; }
+    header h1 { font-size: 16px; }
+    header .badge { font-size: 11px; padding: 3px 8px; }
+
+    .container { flex-direction: column; overflow: visible; }
+    .panel-left {
+      width: 100%; min-width: 0; border-right: none;
+      border-bottom: 1px solid #2a2a2a; padding: 16px; gap: 14px;
+    }
+    .panel-right { padding: 12px; overflow-y: visible; }
+
+    .upload-zone { padding: 28px 16px; }
+    .upload-zone .icon { font-size: 40px; }
+    .upload-zone .hint { font-size: 15px; }
+    .upload-zone.has-image { padding: 12px; }
+    .thumb-preview { max-height: 100px; }
+
+    .section-title { font-size: 12px; letter-spacing: 0.5px; }
+
+    .preset-list { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .preset-card { padding: 12px 10px; gap: 8px; border-radius: 12px; }
+    .preset-card .level-badge { width: 32px; height: 32px; font-size: 12px; border-radius: 6px; }
+    .preset-card .name { font-size: 13px; }
+    .preset-card .methods { font-size: 10px; }
+    .preset-card .impact { font-size: 10px; }
+    .preset-card .check { width: 18px; height: 18px; }
+
+    .btn { padding: 14px 20px; font-size: 15px; border-radius: 10px; }
+
+    .compare-container img, .compare-container canvas { max-width: 100vw; max-height: 60dvh; }
+    .compare-handle { width: 48px; height: 48px; }
+    .compare-handle svg { width: 20px; height: 20px; }
+    .compare-labels { font-size: 13px; margin-top: 10px; }
+    .compare-labels span { padding: 6px 14px; }
+    .compare-slider { width: 4px; }
+
+    .toast { bottom: 16px; padding: 12px 20px; font-size: 14px; border-radius: 10px; }
+    .processing-box { padding: 28px 36px; }
+    .processing-box .spinner { width: 48px; height: 48px; border-width: 4px; }
+    .processing-box div:last-child { font-size: 15px; margin-top: 4px; }
+  }
+
+  @media (max-width: 400px) {
+    .preset-list { grid-template-columns: 1fr; gap: 8px; }
+    .preset-card { padding: 14px 12px; }
+    .preset-card .level-badge { width: 36px; height: 36px; font-size: 14px; }
+    .preset-card .name { font-size: 14px; }
+    .preset-card .methods { font-size: 11px; }
+    .btn { padding: 16px 20px; font-size: 16px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>AI 图片暗水印去除工具</h1>
+  <span class="badge">本地处理 · 不上传服务器</span>
+</header>
+
+<div class="container">
+  <div class="panel-left">
+    <div>
+      <div class="section-title">上传图片</div>
+      <div class="upload-zone" id="uploadZone">
+        <div class="icon">&#x1F4C1;</div>
+        <div class="hint">拖拽图片到此处，或 <strong>点击选择</strong></div>
+        <div class="hint" style="margin-top:4px">也支持 Ctrl+V 粘贴</div>
+        <input type="file" id="fileInput" accept="image/*" hidden>
+      </div>
+    </div>
+
+    <div>
+      <div class="section-title">选择处理强度</div>
+      <div class="preset-list" id="presetList">
+        <div class="preset-card selected" data-preset="light">
+          <div class="level-badge">1</div>
+          <div class="info">
+            <div class="name">轻量</div>
+            <div class="methods">JPEG 再压缩 + 剥离元数据</div>
+            <div class="impact">画质几乎无损</div>
+          </div>
+          <div class="check"></div>
+        </div>
+        <div class="preset-card" data-preset="standard">
+          <div class="level-badge">2</div>
+          <div class="info">
+            <div class="name">标准</div>
+            <div class="methods">JPEG + 高斯模糊 + 微旋转</div>
+            <div class="impact">画质轻微损失</div>
+          </div>
+          <div class="check"></div>
+        </div>
+        <div class="preset-card" data-preset="strong">
+          <div class="level-badge">3</div>
+          <div class="info">
+            <div class="name">强力</div>
+            <div class="methods">DCT 滤波 + 小波滤波 + 高斯模糊</div>
+            <div class="impact">画质中等损失</div>
+          </div>
+          <div class="check"></div>
+        </div>
+        <div class="preset-card" data-preset="extreme">
+          <div class="level-badge">4</div>
+          <div class="info">
+            <div class="name">极限</div>
+            <div class="methods">全部 7 种方法 · 覆盖所有水印类型</div>
+            <div class="impact">画质明显损失</div>
+          </div>
+          <div class="check"></div>
+        </div>
+      </div>
+    </div>
+
+    <button class="btn btn-primary" id="btnProcess" disabled>处理图片</button>
+    <button class="btn btn-secondary" id="btnDownload" disabled>下载处理后的图片</button>
+    <button class="btn btn-secondary" id="btnReset">清除并重新开始</button>
+  </div>
+
+  <div class="panel-right">
+    <div class="preview-area" id="previewArea">
+      <div class="placeholder" id="placeholder">
+        上传图片，选择处理强度，点击「处理图片」<br>前后对比会显示在这里
+      </div>
+      <div class="compare-container" id="compareContainer" style="display:none">
+        <div style="position:relative; display:inline-block;">
+          <canvas id="canvasAfter"></canvas>
+          <div class="compare-before" id="compareBefore">
+            <canvas id="canvasBefore"></canvas>
+          </div>
+          <div class="compare-slider" id="compareSlider">
+            <div class="compare-handle">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="15 18 9 12 15 6"></polyline>
+                <polyline points="9 18 15 12 9 6"></polyline>
+              </svg>
+            </div>
+          </div>
+        </div>
+        <div class="compare-labels">
+          <span>处理前</span>
+          <span>处理后</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============ Presets ============
+// 水印类型覆盖：
+//   频域水印(DCT)   → recompress + dct
+//   频域水印(DWT)   → wavelet (Haar 小波，打击 DwtDctSvd 类水印)
+//   像素级微扰       → noise + resize + rotate
+//   鲁棒水印        → rotate + wavelet (几何+频域组合)
+//   元数据标识       → canvas 重编码自动剥离 EXIF/XMP/C2PA
+//   内生水印        → 综合衰减统计特征
+const PRESETS = {
+  light: {
+    label: '轻量',
+    desc: 'JPEG 再压缩 + 剥离元数据',
+    steps: [
+      { method: 'recompress', value: 85 }
+    ]
+  },
+  standard: {
+    label: '标准',
+    desc: 'JPEG 压缩 + 高斯模糊 + 微旋转',
+    steps: [
+      { method: 'recompress', value: 82 },
+      { method: 'blur', value: 1.0 },
+      { method: 'rotate', value: 0.5 }
+    ]
+  },
+  strong: {
+    label: '强力',
+    desc: 'DCT 滤波 + 小波滤波 + 高斯模糊',
+    steps: [
+      { method: 'recompress', value: 78 },
+      { method: 'blur', value: 1.5 },
+      { method: 'dct', value: 35 },
+      { method: 'wavelet', value: 30 }
+    ]
+  },
+  extreme: {
+    label: '极限',
+    desc: '全部 7 种方法叠加，覆盖所有水印类型',
+    steps: [
+      { method: 'recompress', value: 72 },
+      { method: 'rotate', value: 1.0 },
+      { method: 'resize', value: 97 },
+      { method: 'blur', value: 2.0 },
+      { method: 'dct', value: 45 },
+      { method: 'wavelet', value: 50 },
+      { method: 'noise', value: 4 }
+    ]
+  }
+};
+
+// ============ DOM refs ============
+const uploadZone = document.getElementById('uploadZone');
+const fileInput = document.getElementById('fileInput');
+const placeholder = document.getElementById('placeholder');
+const compareContainer = document.getElementById('compareContainer');
+const compareBefore = document.getElementById('compareBefore');
+const compareSlider = document.getElementById('compareSlider');
+const canvasBefore = document.getElementById('canvasBefore');
+const canvasAfter = document.getElementById('canvasAfter');
+const btnProcess = document.getElementById('btnProcess');
+const btnDownload = document.getElementById('btnDownload');
+const btnReset = document.getElementById('btnReset');
+const presetCards = document.querySelectorAll('.preset-card');
+
+let originalImageData = null;
+let processedDataUrl = null;
+let isProcessing = false;
+let selectedPreset = 'light';
+
+// ============ Preset selection ============
+presetCards.forEach(card => {
+  card.addEventListener('click', () => {
+    presetCards.forEach(c => c.classList.remove('selected'));
+    card.classList.add('selected');
+    selectedPreset = card.dataset.preset;
+
+    // If already processed, re-process with new preset
+    if (originalImageData) {
+      btnProcess.click();
+    }
+  });
+});
+
+// ============ Upload handling ============
+uploadZone.addEventListener('click', () => fileInput.click());
+uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('drag-over'); });
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag-over'));
+uploadZone.addEventListener('drop', e => {
+  e.preventDefault();
+  uploadZone.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file && file.type.startsWith('image/')) loadImage(file);
+});
+
+fileInput.addEventListener('change', () => {
+  const file = fileInput.files[0];
+  if (file) loadImage(file);
+});
+
+document.addEventListener('paste', e => {
+  const items = e.clipboardData?.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      loadImage(item.getAsFile());
+      break;
+    }
+  }
+});
+
+function loadImage(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth;
+      c.height = img.naturalHeight;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      originalImageData = ctx.getImageData(0, 0, c.width, c.height);
+
+      uploadZone.classList.add('has-image');
+      uploadZone.innerHTML = `
+        <img class="thumb-preview" src="${reader.result}" alt="预览">
+        <div class="image-info">${img.naturalWidth} × ${img.naturalHeight} · ${(file.size / 1024).toFixed(0)} KB</div>
+      `;
+
+      btnProcess.disabled = false;
+      processedDataUrl = null;
+      btnDownload.disabled = true;
+      compareContainer.style.display = 'none';
+      placeholder.style.display = 'block';
+
+      // Auto-process on upload
+      btnProcess.click();
+    };
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+// ============ Processing ============
+btnProcess.addEventListener('click', async () => {
+  if (!originalImageData || isProcessing) return;
+  isProcessing = true;
+  btnProcess.disabled = true;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'processing-overlay';
+  overlay.innerHTML = '<div class="processing-box"><div class="spinner"></div><div>正在处理...</div></div>';
+  document.body.appendChild(overlay);
+
+  await new Promise(r => requestAnimationFrame(r));
+
+  try {
+    let imageData = new ImageData(
+      new Uint8ClampedArray(originalImageData.data),
+      originalImageData.width,
+      originalImageData.height
+    );
+
+    const preset = PRESETS[selectedPreset];
+    for (const step of preset.steps) {
+      overlay.querySelector('div:last-child').textContent =
+        `正在处理: ${getMethodName(step.method)}...`;
+      await new Promise(r => requestAnimationFrame(r));
+
+      switch (step.method) {
+        case 'recompress':
+          imageData = await applyRecompress(imageData, step.value / 100);
+          break;
+        case 'resize':
+          imageData = applyResizePerturbation(imageData, step.value / 100);
+          break;
+        case 'blur':
+          imageData = applyGaussianBlur(imageData, step.value);
+          break;
+        case 'dct':
+          imageData = await applyDCTFilter(imageData, step.value);
+          break;
+        case 'noise':
+          imageData = applyNoise(imageData, step.value);
+          break;
+        case 'wavelet':
+          imageData = applyWaveletFilter(imageData, step.value);
+          break;
+        case 'rotate':
+          imageData = applyMicroRotate(imageData, step.value);
+          break;
+      }
+    }
+
+    renderComparison(imageData);
+
+    const outCanvas = document.createElement('canvas');
+    outCanvas.width = imageData.width;
+    outCanvas.height = imageData.height;
+    outCanvas.getContext('2d').putImageData(imageData, 0, 0);
+    processedDataUrl = outCanvas.toDataURL('image/png');
+    btnDownload.disabled = false;
+
+    toast(`${preset.label}处理完成，拖动滑块对比`);
+  } catch (err) {
+    console.error(err);
+    toast('处理出错: ' + err.message);
+  } finally {
+    document.body.removeChild(overlay);
+    isProcessing = false;
+    btnProcess.disabled = false;
+  }
+});
+
+function getMethodName(method) {
+  const map = {
+    recompress: 'JPEG 再压缩（破坏 DCT 频域水印 + 剥离元数据）',
+    resize: '缩放扰动',
+    blur: '高斯模糊 + 锐化',
+    dct: 'DCT 系数滤波',
+    noise: '噪声覆盖（淹没像素级微扰）',
+    wavelet: '小波滤波（打击 DWT 域水印）',
+    rotate: '微旋转（破坏鲁棒多区域水印）'
+  };
+  return map[method] || method;
+}
+
+function renderComparison(processedData) {
+  canvasBefore.width = originalImageData.width;
+  canvasBefore.height = originalImageData.height;
+  canvasBefore.getContext('2d').putImageData(originalImageData, 0, 0);
+
+  canvasAfter.width = processedData.width;
+  canvasAfter.height = processedData.height;
+  canvasAfter.getContext('2d').putImageData(processedData, 0, 0);
+
+  placeholder.style.display = 'none';
+  compareContainer.style.display = 'block';
+  compareBefore.style.clipPath = 'inset(0 50% 0 0)';
+  compareSlider.style.left = '50%';
+}
+
+// ============ Watermark Removal Methods ============
+
+function applyRecompress(imageData, quality) {
+  return new Promise(resolve => {
+    const canvas = document.createElement('canvas');
+    canvas.width = imageData.width;
+    canvas.height = imageData.height;
+    const ctx = canvas.getContext('2d');
+    ctx.putImageData(imageData, 0, 0);
+
+    canvas.toBlob(blob => {
+      const url = URL.createObjectURL(blob);
+      const img = new Image();
+      img.onload = () => {
+        const c2 = document.createElement('canvas');
+        c2.width = imageData.width;
+        c2.height = imageData.height;
+        const ctx2 = c2.getContext('2d');
+        ctx2.drawImage(img, 0, 0);
+        URL.revokeObjectURL(url);
+        resolve(ctx2.getImageData(0, 0, c2.width, c2.height));
+      };
+      img.src = url;
+    }, 'image/jpeg', quality);
+  });
+}
+
+function applyResizePerturbation(imageData, scale) {
+  const canvas = document.createElement('canvas');
+  canvas.width = imageData.width;
+  canvas.height = imageData.height;
+  const ctx = canvas.getContext('2d');
+  ctx.putImageData(imageData, 0, 0);
+
+  const sw = Math.round(imageData.width * scale);
+  const sh = Math.round(imageData.height * scale);
+
+  const tmp = document.createElement('canvas');
+  tmp.width = sw;
+  tmp.height = sh;
+  const tmpCtx = tmp.getContext('2d');
+  tmpCtx.drawImage(canvas, 0, 0, sw, sh);
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(tmp, 0, 0, imageData.width, imageData.height);
+
+  return ctx.getImageData(0, 0, canvas.width, canvas.height);
+}
+
+function applyGaussianBlur(imageData, radius) {
+  if (radius < 0.3) return imageData;
+
+  const w = imageData.width;
+  const h = imageData.height;
+  const src = imageData.data;
+  const dst = new Uint8ClampedArray(src.length);
+
+  const kernelSize = Math.max(3, Math.ceil(radius * 3) * 2 + 1);
+  const kernel = [];
+  const sigma = radius;
+  let sum = 0;
+  const half = Math.floor(kernelSize / 2);
+  for (let i = 0; i < kernelSize; i++) {
+    const x = i - half;
+    const v = Math.exp(-(x * x) / (2 * sigma * sigma)) / (Math.sqrt(2 * Math.PI) * sigma);
+    kernel.push(v);
+    sum += v;
+  }
+  for (let i = 0; i < kernelSize; i++) kernel[i] /= sum;
+
+  const tmp = new Uint8ClampedArray(src.length);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let r = 0, g = 0, b = 0, a = 0;
+      for (let k = 0; k < kernelSize; k++) {
+        const sx = Math.min(Math.max(x + k - half, 0), w - 1);
+        const idx = (y * w + sx) * 4;
+        const wk = kernel[k];
+        r += src[idx] * wk;
+        g += src[idx + 1] * wk;
+        b += src[idx + 2] * wk;
+        a += src[idx + 3] * wk;
+      }
+      const idx = (y * w + x) * 4;
+      tmp[idx] = r; tmp[idx + 1] = g; tmp[idx + 2] = b; tmp[idx + 3] = a;
+    }
+  }
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let r = 0, g = 0, b = 0, a = 0;
+      for (let k = 0; k < kernelSize; k++) {
+        const sy = Math.min(Math.max(y + k - half, 0), h - 1);
+        const idx = (sy * w + x) * 4;
+        const wk = kernel[k];
+        r += tmp[idx] * wk;
+        g += tmp[idx + 1] * wk;
+        b += tmp[idx + 2] * wk;
+        a += tmp[idx + 3] * wk;
+      }
+      const idx = (y * w + x) * 4;
+      dst[idx] = r; dst[idx + 1] = g; dst[idx + 2] = b; dst[idx + 3] = a;
+    }
+  }
+
+  // Unsharp mask
+  const amount = 0.3;
+  for (let i = 0; i < src.length; i += 4) {
+    for (let c = 0; c < 3; c++) {
+      const blurred = dst[i + c];
+      const original = src[i + c];
+      dst[i + c] = Math.min(255, Math.max(0, original + (original - blurred) * amount));
+    }
+  }
+
+  return new ImageData(dst, w, h);
+}
+
+function applyDCTFilter(imageData, strength) {
+  const w = imageData.width;
+  const h = imageData.height;
+  const data = imageData.data;
+
+  const Y = new Float64Array(w * h);
+  const Cb = new Float64Array(w * h);
+  const Cr = new Float64Array(w * h);
+
+  for (let i = 0; i < w * h; i++) {
+    const idx = i * 4;
+    const r = data[idx], g = data[idx + 1], b = data[idx + 2];
+    Y[i]  =  0.299 * r + 0.587 * g + 0.114 * b;
+    Cb[i] = -0.168736 * r - 0.331264 * g + 0.5 * b + 128;
+    Cr[i] =  0.5 * r - 0.418688 * g - 0.081312 * b + 128;
+  }
+
+  const blockSize = 8;
+  const blocksX = Math.floor(w / blockSize);
+  const blocksY = Math.floor(h / blockSize);
+  const keepFrac = 1 - strength / 100;
+  const Yout = new Float64Array(Y);
+
+  for (let by = 0; by < blocksY; by++) {
+    for (let bx = 0; bx < blocksX; bx++) {
+      dctBlock(Y, bx * blockSize, by * blockSize, w, Yout, keepFrac);
+    }
+  }
+
+  const out = new Uint8ClampedArray(data.length);
+  for (let i = 0; i < w * h; i++) {
+    const idx = i * 4;
+    const y = Yout[i], cb = Cb[i], cr = Cr[i];
+    out[idx]     = Math.min(255, Math.max(0, Math.round(y + 1.402 * (cr - 128))));
+    out[idx + 1] = Math.min(255, Math.max(0, Math.round(y - 0.344136 * (cb - 128) - 0.714136 * (cr - 128))));
+    out[idx + 2] = Math.min(255, Math.max(0, Math.round(y + 1.772 * (cb - 128))));
+    out[idx + 3] = data[idx + 3];
+  }
+
+  return new ImageData(out, w, h);
+}
+
+// DCT constants
+const DCT_COS = (() => {
+  const table = new Float64Array(64);
+  for (let u = 0; u < 8; u++)
+    for (let x = 0; x < 8; x++)
+      table[u * 8 + x] = Math.cos(((2 * x + 1) * u * Math.PI) / 16);
+  return table;
+})();
+const DCT_ALPHA = (() => {
+  const a = new Float64Array(8);
+  a[0] = 1 / Math.sqrt(2);
+  for (let i = 1; i < 8; i++) a[i] = 1;
+  return a;
+})();
+
+const ZIGZAG = [
+   0, 1, 8,16, 9, 2, 3,10,
+  17,24,32,25,18,11, 4, 5,
+  12,19,26,33,40,48,41,34,
+  27,20,13, 6, 7,14,21,28,
+  35,42,49,56,57,50,43,36,
+  29,22,15,23,30,37,44,51,
+  58,59,52,45,38,31,39,46,
+  53,60,61,54,47,55,62,63
+];
+
+function dctBlock(src, startX, startY, stride, dst, keepFrac) {
+  const block = new Float64Array(64);
+  for (let y = 0; y < 8; y++)
+    for (let x = 0; x < 8; x++)
+      block[y * 8 + x] = src[(startY + y) * stride + (startX + x)];
+
+  // Forward DCT
+  const tmp = new Float64Array(64);
+  for (let y = 0; y < 8; y++) {
+    for (let u = 0; u < 8; u++) {
+      let sum = 0;
+      for (let x = 0; x < 8; x++) sum += block[y * 8 + x] * DCT_COS[u * 8 + x];
+      tmp[y * 8 + u] = sum * DCT_ALPHA[u] / 2;
+    }
+  }
+
+  const coeffs = new Float64Array(64);
+  for (let v = 0; v < 8; v++) {
+    for (let u = 0; u < 8; u++) {
+      let sum = 0;
+      for (let y = 0; y < 8; y++) sum += tmp[y * 8 + u] * DCT_COS[v * 8 + y];
+      coeffs[v * 8 + u] = sum * DCT_ALPHA[v] / 2;
+    }
+  }
+
+  // Attenuate high frequencies
+  const cutoffIdx = Math.max(0, Math.round(63 * keepFrac));
+  const attenMap = new Float64Array(64);
+  for (let zigIdx = 0; zigIdx < 64; zigIdx++) {
+    const rasterIdx = ZIGZAG[zigIdx];
+    if (zigIdx < cutoffIdx) {
+      attenMap[rasterIdx] = 1;
+    } else {
+      const beyond = zigIdx - cutoffIdx;
+      attenMap[rasterIdx] = Math.max(0, 1 - beyond / Math.max(1, 63 - cutoffIdx));
+    }
+  }
+
+  const filtered = new Float64Array(64);
+  for (let i = 0; i < 64; i++) filtered[i] = coeffs[i] * attenMap[i];
+
+  // Inverse DCT
+  const tmp2 = new Float64Array(64);
+  for (let v = 0; v < 8; v++) {
+    for (let y = 0; y < 8; y++) {
+      let sum = 0;
+      for (let u = 0; u < 8; u++) sum += DCT_ALPHA[u] * filtered[v * 8 + u] * DCT_COS[u * 8 + y];
+      tmp2[y * 8 + v] = sum / 2;
+    }
+  }
+
+  for (let y = 0; y < 8; y++) {
+    for (let x = 0; x < 8; x++) {
+      let sum = 0;
+      for (let v = 0; v < 8; v++) sum += DCT_ALPHA[v] * tmp2[y * 8 + v] * DCT_COS[v * 8 + x];
+      dst[(startY + y) * stride + (startX + x)] = sum / 2;
+    }
+  }
+}
+
+function applyNoise(imageData, intensity) {
+  const data = imageData.data;
+  const out = new Uint8ClampedArray(data.length);
+  for (let i = 0; i < data.length; i += 4) {
+    const noise = (Math.random() - 0.5) * 2 * intensity;
+    out[i]     = Math.min(255, Math.max(0, Math.round(data[i] + noise)));
+    out[i + 1] = Math.min(255, Math.max(0, Math.round(data[i + 1] + noise)));
+    out[i + 2] = Math.min(255, Math.max(0, Math.round(data[i + 2] + noise)));
+    out[i + 3] = data[i + 3];
+  }
+  return new ImageData(out, imageData.width, imageData.height);
+}
+
+function applyWaveletFilter(imageData, strength) {
+  // 1-level 2D Haar DWT on each RGB channel independently
+  // strength: 10-80, attenuates detail subbands (LH, HL, HH)
+  // Targets DwtDctSvd and other wavelet-domain watermarks
+  const w = imageData.width;
+  const h = imageData.height;
+  const data = imageData.data;
+
+  // Pad to even dimensions for wavelet transform
+  const padW = w % 2 === 0 ? w : w + 1;
+  const padH = h % 2 === 0 ? h : h + 1;
+  const halfW = padW / 2;
+  const halfH = padH / 2;
+
+  const atten = 1 - strength / 100; // 0.2 - 0.9
+  const out = new Uint8ClampedArray(data.length);
+
+  // Process each channel
+  for (let ch = 0; ch < 3; ch++) {
+    // Extract channel with padding
+    const src = new Float64Array(padW * padH);
+    for (let y = 0; y < padH; y++) {
+      for (let x = 0; x < padW; x++) {
+        const sx = x < w ? x : w - 1;
+        const sy = y < h ? y : h - 1;
+        src[y * padW + x] = data[(sy * w + sx) * 4 + ch];
+      }
+    }
+
+    // Forward Haar DWT
+    const dwt = haardwt2d(src, padW, padH);
+
+    // Attenuate detail subbands
+    for (let y = 0; y < halfH; y++) {
+      for (let x = 0; x < halfW; x++) {
+        // LH subband (horizontal details) - offset by halfW in x
+        dwt[y * padW + (x + halfW)] *= atten;
+        // HL subband (vertical details) - offset by halfH in y
+        dwt[(y + halfH) * padW + x] *= atten;
+        // HH subband (diagonal details)
+        dwt[(y + halfH) * padW + (x + halfW)] *= atten * atten;
+      }
+    }
+
+    // Inverse Haar DWT
+    const reconstructed = ihaardwt2d(dwt, padW, padH);
+
+    // Write back (crop padding)
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const v = Math.round(reconstructed[y * padW + x]);
+        out[(y * w + x) * 4 + ch] = Math.min(255, Math.max(0, v));
+      }
+    }
+  }
+
+  // Copy alpha channel
+  for (let i = 0; i < w * h; i++) {
+    out[i * 4 + 3] = data[i * 4 + 3];
+  }
+
+  return new ImageData(out, w, h);
+}
+
+// 2D Haar DWT (single level, in-place on rows, then columns)
+function haardwt2d(src, w, h) {
+  const halfW = w / 2, halfH = h / 2;
+  const dst = new Float64Array(w * h);
+
+  // Row transform
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < halfW; x++) {
+      const a = src[y * w + x * 2];
+      const b = src[y * w + x * 2 + 1];
+      dst[y * w + x] = (a + b) / Math.SQRT2;           // Low-pass
+      dst[y * w + (x + halfW)] = (a - b) / Math.SQRT2; // High-pass
+    }
+  }
+
+  // Column transform
+  const result = new Float64Array(w * h);
+  for (let y = 0; y < halfH; y++) {
+    for (let x = 0; x < w; x++) {
+      const a = dst[y * 2 * w + x];
+      const b = dst[(y * 2 + 1) * w + x];
+      result[y * w + x] = (a + b) / Math.SQRT2;             // LL
+      result[(y + halfH) * w + x] = (a - b) / Math.SQRT2;  // HL (column high-pass)
+    }
+  }
+
+  return result;
+}
+
+// Inverse 2D Haar DWT
+function ihaardwt2d(src, w, h) {
+  const halfW = w / 2, halfH = h / 2;
+  const tmp = new Float64Array(w * h);
+
+  // Inverse column transform
+  for (let y = 0; y < halfH; y++) {
+    for (let x = 0; x < w; x++) {
+      const ll = src[y * w + x];                  // LL
+      const hl = src[(y + halfH) * w + x];         // HL
+      tmp[y * 2 * w + x]     = (ll + hl) / Math.SQRT2;
+      tmp[(y * 2 + 1) * w + x] = (ll - hl) / Math.SQRT2;
+    }
+  }
+
+  // Inverse row transform
+  const result = new Float64Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < halfW; x++) {
+      const low  = tmp[y * w + x];                 // Low-pass
+      const high = tmp[y * w + x + halfW];         // High-pass
+      result[y * w + x * 2]     = (low + high) / Math.SQRT2;
+      result[y * w + x * 2 + 1] = (low - high) / Math.SQRT2;
+    }
+  }
+
+  return result;
+}
+
+function applyMicroRotate(imageData, angleDeg) {
+  // Rotate by a tiny angle then crop back to original size
+  // Disrupts spatial alignment of multi-region robust watermarks
+  const w = imageData.width;
+  const h = imageData.height;
+
+  // Put source on canvas
+  const srcCanvas = document.createElement('canvas');
+  srcCanvas.width = w;
+  srcCanvas.height = h;
+  const srcCtx = srcCanvas.getContext('2d');
+  srcCtx.putImageData(imageData, 0, 0);
+
+  // Calculate expanded bounds to avoid corner clipping
+  const rad = angleDeg * Math.PI / 180;
+  const cos = Math.abs(Math.cos(rad));
+  const sin = Math.abs(Math.sin(rad));
+  const expW = Math.ceil(w * cos + h * sin);
+  const expH = Math.ceil(w * sin + h * cos);
+
+  // Draw rotated on expanded canvas
+  const tmpCanvas = document.createElement('canvas');
+  tmpCanvas.width = expW;
+  tmpCanvas.height = expH;
+  const tmpCtx = tmpCanvas.getContext('2d');
+  tmpCtx.translate(expW / 2, expH / 2);
+  tmpCtx.rotate(rad);
+  tmpCtx.drawImage(srcCanvas, -w / 2, -h / 2);
+
+  // Crop center back to original size
+  const outCanvas = document.createElement('canvas');
+  outCanvas.width = w;
+  outCanvas.height = h;
+  const outCtx = outCanvas.getContext('2d');
+  const sx = (expW - w) / 2;
+  const sy = (expH - h) / 2;
+  outCtx.drawImage(tmpCanvas, sx, sy, w, h, 0, 0, w, h);
+
+  return outCtx.getImageData(0, 0, w, h);
+}
+
+// ============ Comparison slider ============
+let isDragging = false;
+
+compareSlider.addEventListener('mousedown', e => { isDragging = true; e.preventDefault(); });
+document.addEventListener('mousemove', e => {
+  if (!isDragging) return;
+  const container = compareSlider.parentElement;
+  const rect = container.getBoundingClientRect();
+  let pct = ((e.clientX - rect.left) / rect.width) * 100;
+  pct = Math.max(0, Math.min(100, pct));
+  compareBefore.style.clipPath = `inset(0 ${100 - pct}% 0 0)`;
+  compareSlider.style.left = pct + '%';
+});
+document.addEventListener('mouseup', () => { isDragging = false; });
+
+compareSlider.addEventListener('touchstart', e => { isDragging = true; e.preventDefault(); });
+document.addEventListener('touchmove', e => {
+  if (!isDragging) return;
+  const container = compareSlider.parentElement;
+  const rect = container.getBoundingClientRect();
+  let pct = ((e.touches[0].clientX - rect.left) / rect.width) * 100;
+  pct = Math.max(0, Math.min(100, pct));
+  compareBefore.style.clipPath = `inset(0 ${100 - pct}% 0 0)`;
+  compareSlider.style.left = pct + '%';
+});
+document.addEventListener('touchend', () => { isDragging = false; });
+
+// ============ Download ============
+btnDownload.addEventListener('click', () => {
+  if (!processedDataUrl) return;
+  const a = document.createElement('a');
+  a.href = processedDataUrl;
+  a.download = 'watermark_removed.png';
+  a.click();
+  toast('下载已开始');
+});
+
+// ============ Reset ============
+btnReset.addEventListener('click', () => {
+  originalImageData = null;
+  processedDataUrl = null;
+  uploadZone.classList.remove('has-image');
+  uploadZone.innerHTML = `
+    <div class="icon">&#x1F4C1;</div>
+    <div class="hint">拖拽图片到此处，或 <strong>点击选择</strong></div>
+    <div class="hint" style="margin-top:4px">也支持 Ctrl+V 粘贴</div>
+  `;
+  btnProcess.disabled = true;
+  btnDownload.disabled = true;
+  compareContainer.style.display = 'none';
+  placeholder.style.display = 'block';
+});
+
+// ============ Toast ============
+function toast(msg) {
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => { t.remove(); }, 2500);
+}
+</script>
+</body>
+</html>
