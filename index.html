@@ -105,6 +105,50 @@
   .preview-area { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }
   .preview-area .placeholder { color: #444; font-size: 14px; text-align: center; }
 
+  /* Mode tabs */
+  .mode-tabs {
+    display: flex; gap: 4px; margin-bottom: 12px;
+    background: #1a1a1a; border-radius: 10px; padding: 4px;
+  }
+  .mode-tab {
+    flex: 1; padding: 8px 0; border: none; border-radius: 8px;
+    background: transparent; color: #888; font-size: 13px;
+    cursor: pointer; transition: all 0.15s;
+  }
+  .mode-tab:hover { color: #ccc; }
+  .mode-tab.active { background: #2a2a2a; color: #fff; font-weight: 500; }
+
+  .tool-options {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 12px;
+    padding: 10px 14px; background: #1a1a1a; border-radius: 10px;
+    flex-wrap: wrap;
+  }
+  .tool-options label { font-size: 12px; color: #999; }
+  .tool-options input[type="range"] { accent-color: #6c8cff; width: 100px; }
+  .tool-options span.val { font-size: 12px; color: #6c8cff; min-width: 32px; }
+  .tool-options .btn-sm {
+    padding: 6px 14px; border-radius: 6px; border: 1px solid #444;
+    background: #2a2a2a; color: #ccc; font-size: 12px; cursor: pointer;
+    transition: all 0.15s;
+  }
+  .tool-options .btn-sm:hover { background: #3a3a3a; }
+  .tool-options .btn-sm.primary { background: #6c8cff; color: #fff; border-color: #6c8cff; }
+  .tool-options .btn-sm.primary:hover { background: #5a7aee; }
+  .tool-options .btn-sm.danger { background: #5a2020; color: #ff6b6b; border-color: #6b2020; }
+
+  /* Edit container */
+  .edit-container {
+    position: relative; display: inline-block;
+    max-width: 100%; max-height: 100%; touch-action: none;
+  }
+  .edit-container canvas {
+    display: block; max-width: 85vw; max-height: 70vh; object-fit: contain;
+  }
+  .edit-overlay {
+    position: absolute; top: 0; left: 0;
+    cursor: crosshair;
+  }
+
   .compare-container {
     position: relative; display: inline-block; user-select: none;
     max-width: 100%; max-height: 100%; touch-action: none;
@@ -193,6 +237,11 @@
     .compare-labels span { padding: 6px 14px; }
     .compare-slider { width: 4px; }
 
+    .mode-tab { font-size: 14px; padding: 10px 0; }
+    .tool-options { gap: 8px; padding: 12px 14px; }
+    .tool-options input[type="range"] { width: 80px; }
+    .edit-container canvas { max-width: 100vw; max-height: 60dvh; }
+
     .toast { bottom: 16px; padding: 12px 20px; font-size: 14px; border-radius: 10px; }
     .processing-box { padding: 28px 36px; }
     .processing-box .spinner { width: 48px; height: 48px; border-width: 4px; }
@@ -276,6 +325,26 @@
   </div>
 
   <div class="panel-right">
+    <div class="mode-tabs" id="modeTabs" style="display:none">
+      <button class="mode-tab active" data-mode="compare">对比</button>
+      <button class="mode-tab" data-mode="watermark">去明水印</button>
+      <button class="mode-tab" data-mode="crop">裁剪</button>
+    </div>
+
+    <div class="tool-options" id="toolWatermark" style="display:none">
+      <label>画笔大小</label>
+      <input type="range" id="brushSize" min="8" max="60" value="24" step="2">
+      <span class="val" id="brushSizeVal">24px</span>
+      <button class="btn-sm primary" id="btnApplyWatermark">执行去除</button>
+      <button class="btn-sm" id="btnUndoWatermark">撤销</button>
+    </div>
+
+    <div class="tool-options" id="toolCrop" style="display:none">
+      <span style="font-size:12px;color:#999">拖拽框选要保留的区域</span>
+      <button class="btn-sm primary" id="btnApplyCrop">确认裁剪</button>
+      <button class="btn-sm danger" id="btnCancelCrop">取消</button>
+    </div>
+
     <div class="preview-area" id="previewArea">
       <div class="placeholder" id="placeholder">
         上传图片，选择处理强度，点击「处理图片」<br>前后对比会显示在这里
@@ -299,6 +368,10 @@
           <span>处理前</span>
           <span>处理后</span>
         </div>
+      </div>
+      <div class="edit-container" id="editContainer" style="display:none">
+        <canvas id="canvasEdit"></canvas>
+        <canvas class="edit-overlay" id="canvasOverlay"></canvas>
       </div>
     </div>
   </div>
@@ -373,6 +446,565 @@ let originalImageData = null;
 let processedDataUrl = null;
 let isProcessing = false;
 let selectedPreset = 'light';
+let currentEditImageData = null;  // current state of the edited image
+let undoStack = [];               // for watermark removal undo
+let currentMode = 'compare';
+
+// ============ New DOM refs ============
+const modeTabs = document.getElementById('modeTabs');
+const toolWatermark = document.getElementById('toolWatermark');
+const toolCrop = document.getElementById('toolCrop');
+const editContainer = document.getElementById('editContainer');
+const canvasEdit = document.getElementById('canvasEdit');
+const canvasOverlay = document.getElementById('canvasOverlay');
+const brushSizeInput = document.getElementById('brushSize');
+const brushSizeVal = document.getElementById('brushSizeVal');
+const btnApplyWatermark = document.getElementById('btnApplyWatermark');
+const btnUndoWatermark = document.getElementById('btnUndoWatermark');
+const btnApplyCrop = document.getElementById('btnApplyCrop');
+const btnCancelCrop = document.getElementById('btnCancelCrop');
+
+// ============ Mode switching ============
+document.querySelectorAll('.mode-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.mode-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    switchMode(tab.dataset.mode);
+  });
+});
+
+function switchMode(mode) {
+  currentMode = mode;
+  compareContainer.style.display = 'none';
+  editContainer.style.display = 'none';
+  toolWatermark.style.display = 'none';
+  toolCrop.style.display = 'none';
+
+  if (mode === 'compare') {
+    compareContainer.style.display = 'block';
+  } else if (mode === 'watermark') {
+    editContainer.style.display = 'block';
+    toolWatermark.style.display = 'flex';
+    setupEditCanvas();
+  } else if (mode === 'crop') {
+    editContainer.style.display = 'block';
+    toolCrop.style.display = 'flex';
+    setupEditCanvas();
+  }
+}
+
+function showModeTabs() {
+  modeTabs.style.display = 'flex';
+  // Reset to compare mode
+  document.querySelectorAll('.mode-tab').forEach(t => t.classList.remove('active'));
+  modeTabs.querySelector('[data-mode="compare"]').classList.add('active');
+  switchMode('compare');
+}
+
+function setupEditCanvas() {
+  if (!currentEditImageData && processedDataUrl) {
+    // Load from processed data
+    const img = new Image();
+    img.onload = () => {
+      canvasEdit.width = img.naturalWidth;
+      canvasEdit.height = img.naturalHeight;
+      const ctx = canvasEdit.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      currentEditImageData = ctx.getImageData(0, 0, canvasEdit.width, canvasEdit.height);
+      syncOverlayCanvas();
+    };
+    img.src = processedDataUrl;
+  } else if (currentEditImageData) {
+    canvasEdit.width = currentEditImageData.width;
+    canvasEdit.height = currentEditImageData.height;
+    canvasEdit.getContext('2d').putImageData(currentEditImageData, 0, 0);
+    syncOverlayCanvas();
+  }
+}
+
+function syncOverlayCanvas() {
+  canvasOverlay.width = canvasEdit.width;
+  canvasOverlay.height = canvasEdit.height;
+}
+
+// ============ Visible watermark removal (brush + inpainting) ============
+let isBrushing = false;
+let brushMask = null; // Uint8Array, 1 = marked for removal
+
+brushSizeInput.addEventListener('input', () => {
+  brushSizeVal.textContent = brushSizeInput.value + 'px';
+});
+
+function ensureBrushMask() {
+  if (!brushMask || brushMask.length !== canvasEdit.width * canvasEdit.height) {
+    brushMask = new Uint8Array(canvasEdit.width * canvasEdit.height);
+  }
+}
+
+canvasOverlay.addEventListener('mousedown', e => {
+  if (currentMode !== 'watermark') return;
+  isBrushing = true;
+  ensureBrushMask();
+  paintBrush(e);
+});
+
+canvasOverlay.addEventListener('mousemove', e => {
+  if (!isBrushing || currentMode !== 'watermark') return;
+  paintBrush(e);
+});
+
+canvasOverlay.addEventListener('mouseup', () => { isBrushing = false; });
+canvasOverlay.addEventListener('mouseleave', () => { isBrushing = false; });
+
+canvasOverlay.addEventListener('touchstart', e => {
+  if (currentMode !== 'watermark') return;
+  e.preventDefault();
+  isBrushing = true;
+  ensureBrushMask();
+  paintBrush(e.touches[0]);
+});
+
+canvasOverlay.addEventListener('touchmove', e => {
+  if (!isBrushing || currentMode !== 'watermark') return;
+  e.preventDefault();
+  paintBrush(e.touches[0]);
+});
+
+canvasOverlay.addEventListener('touchend', () => { isBrushing = false; });
+
+function paintBrush(e) {
+  const rect = canvasOverlay.getBoundingClientRect();
+  const scaleX = canvasOverlay.width / rect.width;
+  const scaleY = canvasOverlay.height / rect.height;
+  const cx = Math.round((e.clientX - rect.left) * scaleX);
+  const cy = Math.round((e.clientY - rect.top) * scaleY);
+  const r = Math.round(brushSizeInput.value / 2);
+
+  const ctx = canvasOverlay.getContext('2d');
+  const w = canvasOverlay.width;
+
+  // Paint on overlay as semi-transparent red
+  ctx.fillStyle = 'rgba(255, 60, 60, 0.35)';
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Also update mask
+  for (let dy = -r; dy <= r; dy++) {
+    for (let dx = -r; dx <= r; dx++) {
+      if (dx * dx + dy * dy <= r * r) {
+        const px = cx + dx;
+        const py = cy + dy;
+        if (px >= 0 && px < canvasOverlay.width && py >= 0 && py < canvasOverlay.height) {
+          brushMask[py * w + px] = 1;
+        }
+      }
+    }
+  }
+}
+
+btnApplyWatermark.addEventListener('click', () => {
+  if (!brushMask || !currentEditImageData) return;
+  // Check if any pixels were marked
+  let marked = 0;
+  for (let i = 0; i < brushMask.length; i++) {
+    if (brushMask[i]) marked++;
+  }
+  if (marked === 0) { toast('请先用画笔涂抹要去除的水印区域'); return; }
+
+  // Save for undo
+  undoStack.push(new ImageData(
+    new Uint8ClampedArray(currentEditImageData.data),
+    currentEditImageData.width,
+    currentEditImageData.height
+  ));
+
+  // Inpaint
+  currentEditImageData = inpaintArea(currentEditImageData, brushMask);
+
+  // Update display
+  canvasEdit.getContext('2d').putImageData(currentEditImageData, 0, 0);
+  // Clear overlay
+  canvasOverlay.getContext('2d').clearRect(0, 0, canvasOverlay.width, canvasOverlay.height);
+  brushMask = new Uint8Array(canvasEdit.width * canvasEdit.height);
+
+  // Update download
+  const outCanvas = document.createElement('canvas');
+  outCanvas.width = currentEditImageData.width;
+  outCanvas.height = currentEditImageData.height;
+  outCanvas.getContext('2d').putImageData(currentEditImageData, 0, 0);
+  processedDataUrl = outCanvas.toDataURL('image/png');
+  btnDownload.disabled = false;
+
+  toast('明水印已去除');
+});
+
+btnUndoWatermark.addEventListener('click', () => {
+  if (undoStack.length === 0) { toast('没有可撤销的操作'); return; }
+  currentEditImageData = undoStack.pop();
+  canvasEdit.getContext('2d').putImageData(currentEditImageData, 0, 0);
+  canvasOverlay.getContext('2d').clearRect(0, 0, canvasOverlay.width, canvasOverlay.height);
+  brushMask = new Uint8Array(canvasEdit.width * canvasEdit.height);
+  const outCanvas = document.createElement('canvas');
+  outCanvas.width = currentEditImageData.width;
+  outCanvas.height = currentEditImageData.height;
+  outCanvas.getContext('2d').putImageData(currentEditImageData, 0, 0);
+  processedDataUrl = outCanvas.toDataURL('image/png');
+  toast('已撤销');
+});
+
+function inpaintArea(imageData, mask, searchRadius) {
+  if (!searchRadius) searchRadius = Math.max(20, Math.round(brushSizeInput.value * 1.5));
+  const w = imageData.width;
+  const h = imageData.height;
+  const data = imageData.data;
+  const out = new Uint8ClampedArray(data);
+
+  // Find bounding box of masked area (for performance)
+  let minX = w, minY = h, maxX = 0, maxY = 0;
+  let hasMask = false;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (mask[y * w + x]) {
+        hasMask = true;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (!hasMask) return imageData;
+
+  // Expand bounding box by search radius
+  minX = Math.max(0, minX - searchRadius);
+  minY = Math.max(0, minY - searchRadius);
+  maxX = Math.min(w - 1, maxX + searchRadius);
+  maxY = Math.min(h - 1, maxY + searchRadius);
+
+  const sigma = searchRadius / 3;
+
+  for (let y = minY; y <= maxY; y++) {
+    for (let x = minX; x <= maxX; x++) {
+      if (!mask[y * w + x]) continue;
+      let rSum = 0, gSum = 0, bSum = 0, wSum = 0;
+      for (let dy = -searchRadius; dy <= searchRadius; dy++) {
+        const sy = y + dy;
+        if (sy < 0 || sy >= h) continue;
+        for (let dx = -searchRadius; dx <= searchRadius; dx++) {
+          const sx = x + dx;
+          if (sx < 0 || sx >= w) continue;
+          if (mask[sy * w + sx]) continue; // skip other masked pixels
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist > searchRadius) continue;
+          const weight = Math.exp(-(dist * dist) / (2 * sigma * sigma));
+          const idx = (sy * w + sx) * 4;
+          rSum += data[idx] * weight;
+          gSum += data[idx + 1] * weight;
+          bSum += data[idx + 2] * weight;
+          wSum += weight;
+        }
+      }
+      if (wSum > 0) {
+        const idx = (y * w + x) * 4;
+        out[idx] = Math.round(rSum / wSum);
+        out[idx + 1] = Math.round(gSum / wSum);
+        out[idx + 2] = Math.round(bSum / wSum);
+      }
+    }
+  }
+
+  return new ImageData(out, w, h);
+}
+
+// ============ Crop ============
+let cropRect = null;  // { x, y, w, h }
+let cropDragging = false;
+let cropStartX, cropStartY;
+let cropResizeHandle = null; // 'tl','tr','bl','br' or null for move/draw
+
+canvasOverlay.addEventListener('mousedown', e => {
+  if (currentMode !== 'crop') return;
+  const pos = getCanvasPos(e);
+  if (!pos) return;
+
+  if (cropRect) {
+    // Check if we're on a resize handle
+    const handle = hitTestHandle(pos.x, pos.y);
+    if (handle) {
+      cropResizeHandle = handle;
+      cropStartX = pos.x;
+      cropStartY = pos.y;
+      return;
+    }
+    // Check if we're inside the crop rect (move)
+    if (pos.x >= cropRect.x && pos.x <= cropRect.x + cropRect.w &&
+        pos.y >= cropRect.y && pos.y <= cropRect.y + cropRect.h) {
+      cropDragging = true;
+      cropStartX = pos.x - cropRect.x;
+      cropStartY = pos.y - cropRect.y;
+      return;
+    }
+    // Click outside = start new crop
+    cropRect = null;
+  }
+
+  // Start new crop rectangle
+  cropDragging = true;
+  cropStartX = pos.x;
+  cropStartY = pos.y;
+  cropRect = null;
+});
+
+canvasOverlay.addEventListener('mousemove', e => {
+  if (currentMode !== 'crop') return;
+
+  // Update cursor
+  if (!cropDragging && !cropResizeHandle && cropRect) {
+    const pos = getCanvasPos(e);
+    if (pos && hitTestHandle(pos.x, pos.y)) {
+      canvasOverlay.style.cursor = 'pointer';
+    } else if (pos && pos.x >= cropRect.x && pos.x <= cropRect.x + cropRect.w &&
+               pos.y >= cropRect.y && pos.y <= cropRect.y + cropRect.h) {
+      canvasOverlay.style.cursor = 'move';
+    } else {
+      canvasOverlay.style.cursor = 'crosshair';
+    }
+  }
+
+  if (!cropDragging && !cropResizeHandle) return;
+
+  const pos = getCanvasPos(e);
+  if (!pos) return;
+
+  if (cropResizeHandle) {
+    resizeCropRect(cropResizeHandle, pos.x, pos.y, cropStartX, cropStartY);
+    cropStartX = pos.x;
+    cropStartY = pos.y;
+  } else if (cropDragging) {
+    if (!cropRect) {
+      // Drawing new rect
+      const x = Math.min(cropStartX, pos.x);
+      const y = Math.min(cropStartY, pos.y);
+      const w = Math.abs(pos.x - cropStartX);
+      const h = Math.abs(pos.y - cropStartY);
+      cropRect = { x, y, w, h };
+    } else {
+      // Moving existing rect
+      cropRect.x = pos.x - cropStartX;
+      cropRect.y = pos.y - cropStartY;
+      clampCropRect();
+    }
+  }
+  drawCropOverlay();
+});
+
+canvasOverlay.addEventListener('mouseup', () => {
+  cropDragging = false;
+  cropResizeHandle = null;
+});
+canvasOverlay.addEventListener('mouseleave', () => {
+  cropDragging = false;
+  cropResizeHandle = null;
+});
+
+// Touch crop
+canvasOverlay.addEventListener('touchstart', e => {
+  if (currentMode !== 'crop') return;
+  e.preventDefault();
+  const pos = getCanvasPos(e.touches[0]);
+  if (!pos) return;
+
+  if (cropRect) {
+    const handle = hitTestHandle(pos.x, pos.y);
+    if (handle) {
+      cropResizeHandle = handle;
+      cropStartX = pos.x;
+      cropStartY = pos.y;
+      return;
+    }
+    if (pos.x >= cropRect.x && pos.x <= cropRect.x + cropRect.w &&
+        pos.y >= cropRect.y && pos.y <= cropRect.y + cropRect.h) {
+      cropDragging = true;
+      cropStartX = pos.x - cropRect.x;
+      cropStartY = pos.y - cropRect.y;
+      return;
+    }
+    cropRect = null;
+  }
+  cropDragging = true;
+  cropStartX = pos.x;
+  cropStartY = pos.y;
+  cropRect = null;
+});
+
+canvasOverlay.addEventListener('touchmove', e => {
+  if (currentMode !== 'crop') return;
+  e.preventDefault();
+  if (!cropDragging && !cropResizeHandle) return;
+  const pos = getCanvasPos(e.touches[0]);
+  if (!pos) return;
+
+  if (cropResizeHandle) {
+    resizeCropRect(cropResizeHandle, pos.x, pos.y, cropStartX, cropStartY);
+    cropStartX = pos.x;
+    cropStartY = pos.y;
+  } else if (cropDragging) {
+    if (!cropRect) {
+      const x = Math.min(cropStartX, pos.x);
+      const y = Math.min(cropStartY, pos.y);
+      cropRect = { x, y, w: Math.abs(pos.x - cropStartX), h: Math.abs(pos.y - cropStartY) };
+    } else {
+      cropRect.x = pos.x - cropStartX;
+      cropRect.y = pos.y - cropStartY;
+      clampCropRect();
+    }
+  }
+  drawCropOverlay();
+});
+
+canvasOverlay.addEventListener('touchend', () => {
+  cropDragging = false;
+  cropResizeHandle = null;
+});
+
+function getCanvasPos(e) {
+  const rect = canvasOverlay.getBoundingClientRect();
+  if (!rect.width || !rect.height) return null;
+  return {
+    x: (e.clientX - rect.left) * (canvasOverlay.width / rect.width),
+    y: (e.clientY - rect.top) * (canvasOverlay.height / rect.height)
+  };
+}
+
+function hitTestHandle(x, y) {
+  if (!cropRect) return null;
+  const handles = [
+    { name: 'tl', x: cropRect.x, y: cropRect.y },
+    { name: 'tr', x: cropRect.x + cropRect.w, y: cropRect.y },
+    { name: 'bl', x: cropRect.x, y: cropRect.y + cropRect.h },
+    { name: 'br', x: cropRect.x + cropRect.w, y: cropRect.y + cropRect.h }
+  ];
+  for (const h of handles) {
+    if (Math.abs(x - h.x) < 12 && Math.abs(y - h.y) < 12) return h.name;
+  }
+  return null;
+}
+
+function resizeCropRect(handle, x, y, prevX, prevY) {
+  const dx = x - prevX;
+  const dy = y - prevY;
+  const minSize = 10;
+  if (handle === 'tl') {
+    cropRect.x = Math.min(cropRect.x + dx, cropRect.x + cropRect.w - minSize);
+    cropRect.y = Math.min(cropRect.y + dy, cropRect.y + cropRect.h - minSize);
+    cropRect.w = Math.max(minSize, cropRect.w - dx);
+    cropRect.h = Math.max(minSize, cropRect.h - dy);
+  } else if (handle === 'tr') {
+    cropRect.y = Math.min(cropRect.y + dy, cropRect.y + cropRect.h - minSize);
+    cropRect.w = Math.max(minSize, cropRect.w + dx);
+    cropRect.h = Math.max(minSize, cropRect.h - dy);
+  } else if (handle === 'bl') {
+    cropRect.x = Math.min(cropRect.x + dx, cropRect.x + cropRect.w - minSize);
+    cropRect.w = Math.max(minSize, cropRect.w - dx);
+    cropRect.h = Math.max(minSize, cropRect.h + dy);
+  } else if (handle === 'br') {
+    cropRect.w = Math.max(minSize, cropRect.w + dx);
+    cropRect.h = Math.max(minSize, cropRect.h + dy);
+  }
+  clampCropRect();
+}
+
+function clampCropRect() {
+  const w = canvasOverlay.width;
+  const h = canvasOverlay.height;
+  cropRect.x = Math.max(0, Math.min(cropRect.x, w - cropRect.w));
+  cropRect.y = Math.max(0, Math.min(cropRect.y, h - cropRect.h));
+  cropRect.w = Math.min(cropRect.w, w - cropRect.x);
+  cropRect.h = Math.min(cropRect.h, h - cropRect.y);
+}
+
+function drawCropOverlay() {
+  const ctx = canvasOverlay.getContext('2d');
+  const w = canvasOverlay.width;
+  const h = canvasOverlay.height;
+  ctx.clearRect(0, 0, w, h);
+
+  if (!cropRect) return;
+
+  // Darken outside crop area
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+  ctx.fillRect(0, 0, w, cropRect.y);                           // top
+  ctx.fillRect(0, cropRect.y + cropRect.h, w, h);              // bottom
+  ctx.fillRect(0, cropRect.y, cropRect.x, cropRect.h);         // left
+  ctx.fillRect(cropRect.x + cropRect.w, cropRect.y, w, cropRect.h); // right
+
+  // Border
+  ctx.strokeStyle = '#6c8cff';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(cropRect.x, cropRect.y, cropRect.w, cropRect.h);
+
+  // Corner handles
+  const handles = [
+    [cropRect.x, cropRect.y],
+    [cropRect.x + cropRect.w, cropRect.y],
+    [cropRect.x, cropRect.y + cropRect.h],
+    [cropRect.x + cropRect.w, cropRect.y + cropRect.h]
+  ];
+  ctx.fillStyle = '#fff';
+  ctx.strokeStyle = '#6c8cff';
+  ctx.lineWidth = 1.5;
+  handles.forEach(([hx, hy]) => {
+    ctx.beginPath();
+    ctx.arc(hx, hy, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  });
+}
+
+btnApplyCrop.addEventListener('click', () => {
+  if (!cropRect || !currentEditImageData) return;
+  if (cropRect.w < 10 || cropRect.h < 10) {
+    toast('裁剪区域太小'); return;
+  }
+
+  const sw = currentEditImageData.width;
+  const sh = currentEditImageData.height;
+
+  // Create new image from crop rect
+  const srcCanvas = document.createElement('canvas');
+  srcCanvas.width = sw;
+  srcCanvas.height = sh;
+  srcCanvas.getContext('2d').putImageData(currentEditImageData, 0, 0);
+
+  const outCanvas = document.createElement('canvas');
+  outCanvas.width = cropRect.w;
+  outCanvas.height = cropRect.h;
+  const outCtx = outCanvas.getContext('2d');
+  outCtx.drawImage(srcCanvas, cropRect.x, cropRect.y, cropRect.w, cropRect.h, 0, 0, cropRect.w, cropRect.h);
+
+  currentEditImageData = outCtx.getImageData(0, 0, cropRect.w, cropRect.h);
+  processedDataUrl = outCanvas.toDataURL('image/png');
+  btnDownload.disabled = false;
+
+  // Reset edit canvas
+  canvasEdit.width = cropRect.w;
+  canvasEdit.height = cropRect.h;
+  canvasEdit.getContext('2d').putImageData(currentEditImageData, 0, 0);
+  canvasOverlay.width = cropRect.w;
+  canvasOverlay.height = cropRect.h;
+  canvasOverlay.getContext('2d').clearRect(0, 0, cropRect.w, cropRect.h);
+  cropRect = null;
+  undoStack = [];
+
+  toast(`已裁剪为 ${cropRect.w} × ${cropRect.h}`);
+});
+
+btnCancelCrop.addEventListener('click', () => {
+  cropRect = null;
+  drawCropOverlay();
+  toast('已取消裁剪选择');
+});
 
 // ============ Preset selection ============
 presetCards.forEach(card => {
@@ -506,6 +1138,17 @@ btnProcess.addEventListener('click', async () => {
     outCanvas.getContext('2d').putImageData(imageData, 0, 0);
     processedDataUrl = outCanvas.toDataURL('image/png');
     btnDownload.disabled = false;
+
+    // Init edit state for watermark/crop modes
+    currentEditImageData = new ImageData(
+      new Uint8ClampedArray(imageData.data),
+      imageData.width,
+      imageData.height
+    );
+    undoStack = [];
+    brushMask = null;
+    cropRect = null;
+    showModeTabs();
 
     toast(`${preset.label}处理完成，拖动滑块对比`);
   } catch (err) {
@@ -1009,6 +1652,10 @@ btnDownload.addEventListener('click', () => {
 btnReset.addEventListener('click', () => {
   originalImageData = null;
   processedDataUrl = null;
+  currentEditImageData = null;
+  undoStack = [];
+  brushMask = null;
+  cropRect = null;
   uploadZone.classList.remove('has-image');
   uploadZone.innerHTML = `
     <div class="icon">&#x1F4C1;</div>
@@ -1018,7 +1665,11 @@ btnReset.addEventListener('click', () => {
   btnProcess.disabled = true;
   btnDownload.disabled = true;
   compareContainer.style.display = 'none';
+  editContainer.style.display = 'none';
   placeholder.style.display = 'block';
+  modeTabs.style.display = 'none';
+  toolWatermark.style.display = 'none';
+  toolCrop.style.display = 'none';
 });
 
 // ============ Toast ============
