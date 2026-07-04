@@ -268,12 +268,12 @@
   <div class="panel-left">
     <div>
       <div class="section-title">上传图片</div>
-      <div class="upload-zone" id="uploadZone">
+      <label class="upload-zone" id="uploadZone" for="fileInput">
         <div class="icon">&#x1F4C1;</div>
         <div class="hint">拖拽图片到此处，或 <strong>点击选择</strong></div>
         <div class="hint" style="margin-top:4px">也支持 Ctrl+V 粘贴</div>
-        <input type="file" id="fileInput" accept="image/*" hidden>
-      </div>
+      </label>
+      <input type="file" id="fileInput" accept="image/*" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none">
     </div>
 
     <div>
@@ -1079,7 +1079,7 @@ presetCards.forEach(card => {
 });
 
 // ============ Upload handling ============
-uploadZone.addEventListener('click', () => fileInput.click());
+// <label for="fileInput"> handles click natively — no JS click() needed
 uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('drag-over'); });
 uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag-over'));
 uploadZone.addEventListener('drop', e => {
