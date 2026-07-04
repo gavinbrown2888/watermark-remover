@@ -327,7 +327,6 @@
     <div class="mode-tabs" id="modeTabs" style="display:none">
       <button class="mode-tab active" data-mode="compare">对比</button>
       <button class="mode-tab" data-mode="watermark">去明水印</button>
-      <button class="mode-tab" data-mode="crop">裁剪</button>
     </div>
 
     <div class="tool-options" id="toolWatermark" style="display:none">
@@ -336,12 +335,6 @@
       <span class="val" id="brushSizeVal">24px</span>
       <button class="btn-sm primary" id="btnApplyWatermark">执行去除</button>
       <button class="btn-sm" id="btnUndoWatermark">撤销</button>
-    </div>
-
-    <div class="tool-options" id="toolCrop" style="display:none">
-      <span style="font-size:12px;color:#999">拖拽框选要保留的区域</span>
-      <button class="btn-sm primary" id="btnApplyCrop">确认裁剪</button>
-      <button class="btn-sm danger" id="btnCancelCrop">取消</button>
     </div>
 
     <div class="preview-area" id="previewArea">
@@ -452,7 +445,6 @@ let currentMode = 'compare';
 // ============ New DOM refs ============
 const modeTabs = document.getElementById('modeTabs');
 const toolWatermark = document.getElementById('toolWatermark');
-const toolCrop = document.getElementById('toolCrop');
 const editContainer = document.getElementById('editContainer');
 const canvasEdit = document.getElementById('canvasEdit');
 const canvasOverlay = document.getElementById('canvasOverlay');
@@ -460,8 +452,6 @@ const brushSizeInput = document.getElementById('brushSize');
 const brushSizeVal = document.getElementById('brushSizeVal');
 const btnApplyWatermark = document.getElementById('btnApplyWatermark');
 const btnUndoWatermark = document.getElementById('btnUndoWatermark');
-const btnApplyCrop = document.getElementById('btnApplyCrop');
-const btnCancelCrop = document.getElementById('btnCancelCrop');
 
 // ============ Mode switching ============
 document.querySelectorAll('.mode-tab').forEach(tab => {
@@ -477,17 +467,12 @@ function switchMode(mode) {
   compareContainer.style.display = 'none';
   editContainer.style.display = 'none';
   toolWatermark.style.display = 'none';
-  toolCrop.style.display = 'none';
 
   if (mode === 'compare') {
     compareContainer.style.display = 'block';
   } else if (mode === 'watermark') {
     editContainer.style.display = 'block';
     toolWatermark.style.display = 'flex';
-    setupEditCanvas();
-  } else if (mode === 'crop') {
-    editContainer.style.display = 'block';
-    toolCrop.style.display = 'flex';
     setupEditCanvas();
   }
 }
@@ -746,170 +731,7 @@ function inpaintArea(imageData, mask, searchRadius) {
   return new ImageData(out, w, h);
 }
 
-// ============ Crop ============
-let cropRect = null;  // { x, y, w, h }
-let cropDragging = false;
-let cropStartX, cropStartY;
-let cropResizeHandle = null; // 'tl','tr','bl','br' or null for move/draw
-
-canvasOverlay.addEventListener('mousedown', e => {
-  if (currentMode !== 'crop') return;
-  const pos = getCanvasPos(e);
-  if (!pos) return;
-
-  if (cropRect) {
-    // Check if we're on a resize handle
-    const handle = hitTestHandle(pos.x, pos.y);
-    if (handle) {
-      cropResizeHandle = handle;
-      cropStartX = pos.x;
-      cropStartY = pos.y;
-      return;
-    }
-    // Check if we're inside the crop rect (move)
-    if (pos.x >= cropRect.x && pos.x <= cropRect.x + cropRect.w &&
-        pos.y >= cropRect.y && pos.y <= cropRect.y + cropRect.h) {
-      cropDragging = true;
-      cropStartX = pos.x - cropRect.x;
-      cropStartY = pos.y - cropRect.y;
-      return;
-    }
-    // Click outside = start new crop
-    cropRect = null;
-  }
-
-  // Start new crop rectangle
-  cropDragging = true;
-  cropStartX = pos.x;
-  cropStartY = pos.y;
-  cropRect = null;
-});
-
-canvasOverlay.addEventListener('mousemove', e => {
-  if (currentMode !== 'crop') return;
-
-  // Update cursor
-  if (!cropDragging && !cropResizeHandle && cropRect) {
-    const pos = getCanvasPos(e);
-    if (pos && hitTestHandle(pos.x, pos.y)) {
-      canvasOverlay.style.cursor = 'pointer';
-    } else if (pos && pos.x >= cropRect.x && pos.x <= cropRect.x + cropRect.w &&
-               pos.y >= cropRect.y && pos.y <= cropRect.y + cropRect.h) {
-      canvasOverlay.style.cursor = 'move';
-    } else {
-      canvasOverlay.style.cursor = 'crosshair';
-    }
-  }
-
-  if (!cropDragging && !cropResizeHandle) return;
-
-  const pos = getCanvasPos(e);
-  if (!pos) return;
-
-  if (cropResizeHandle) {
-    resizeCropRect(cropResizeHandle, pos.x, pos.y, cropStartX, cropStartY);
-    cropStartX = pos.x;
-    cropStartY = pos.y;
-  } else if (cropDragging) {
-    if (!cropRect) {
-      // Drawing new rect
-      const x = Math.min(cropStartX, pos.x);
-      const y = Math.min(cropStartY, pos.y);
-      const w = Math.abs(pos.x - cropStartX);
-      const h = Math.abs(pos.y - cropStartY);
-      cropRect = { x, y, w, h };
-    } else {
-      // Moving existing rect
-      cropRect.x = pos.x - cropStartX;
-      cropRect.y = pos.y - cropStartY;
-      clampCropRect();
-    }
-  }
-  drawCropOverlay();
-});
-
-canvasOverlay.addEventListener('mouseup', () => {
-  cropDragging = false;
-  cropResizeHandle = null;
-});
-canvasOverlay.addEventListener('mouseleave', () => {
-  cropDragging = false;
-  cropResizeHandle = null;
-});
-
-// Touch crop
-canvasOverlay.addEventListener('touchstart', e => {
-  if (currentMode !== 'crop') return;
-  const pos = getCanvasPos(e.touches[0]);
-  if (!pos) return;
-
-  if (cropRect) {
-    const handle = hitTestHandle(pos.x, pos.y);
-    if (handle) {
-      e.preventDefault();
-      canvasOverlay.style.touchAction = 'none';
-      cropResizeHandle = handle;
-      cropStartX = pos.x;
-      cropStartY = pos.y;
-      return;
-    }
-    if (pos.x >= cropRect.x && pos.x <= cropRect.x + cropRect.w &&
-        pos.y >= cropRect.y && pos.y <= cropRect.y + cropRect.h) {
-      e.preventDefault();
-      canvasOverlay.style.touchAction = 'none';
-      cropDragging = true;
-      cropStartX = pos.x - cropRect.x;
-      cropStartY = pos.y - cropRect.y;
-      return;
-    }
-    cropRect = null;
-  }
-  e.preventDefault();
-  canvasOverlay.style.touchAction = 'none';
-  cropDragging = true;
-  cropStartX = pos.x;
-  cropStartY = pos.y;
-  cropRect = null;
-});
-
-canvasOverlay.addEventListener('touchmove', e => {
-  if (currentMode !== 'crop') return;
-  if (!cropDragging && !cropResizeHandle) return;
-  e.preventDefault();
-  const pos = getCanvasPos(e.touches[0]);
-  if (!pos) return;
-
-  if (cropResizeHandle) {
-    resizeCropRect(cropResizeHandle, pos.x, pos.y, cropStartX, cropStartY);
-    cropStartX = pos.x;
-    cropStartY = pos.y;
-  } else if (cropDragging) {
-    if (!cropRect) {
-      const x = Math.min(cropStartX, pos.x);
-      const y = Math.min(cropStartY, pos.y);
-      cropRect = { x, y, w: Math.abs(pos.x - cropStartX), h: Math.abs(pos.y - cropStartY) };
-    } else {
-      cropRect.x = pos.x - cropStartX;
-      cropRect.y = pos.y - cropStartY;
-      clampCropRect();
-    }
-  }
-  drawCropOverlay();
-});
-
-canvasOverlay.addEventListener('touchend', () => {
-  if (cropDragging || cropResizeHandle) {
-    canvasOverlay.style.touchAction = '';
-  }
-  cropDragging = false;
-  cropResizeHandle = null;
-});
-canvasOverlay.addEventListener('touchcancel', () => {
-  canvasOverlay.style.touchAction = '';
-  cropDragging = false;
-  cropResizeHandle = null;
-});
-
+// ============ Canvas position helper (used by watermark brush) ============
 function getCanvasPos(e) {
   const rect = canvasOverlay.getBoundingClientRect();
   if (!rect.width || !rect.height) return null;
@@ -920,149 +742,6 @@ function getCanvasPos(e) {
     y: (e.clientY - rect.top) * sy
   };
 }
-
-function hitTestHandle(x, y) {
-  if (!cropRect) return null;
-  const handles = [
-    { name: 'tl', x: cropRect.x, y: cropRect.y },
-    { name: 'tr', x: cropRect.x + cropRect.w, y: cropRect.y },
-    { name: 'bl', x: cropRect.x, y: cropRect.y + cropRect.h },
-    { name: 'br', x: cropRect.x + cropRect.w, y: cropRect.y + cropRect.h }
-  ];
-  for (const h of handles) {
-    if (Math.abs(x - h.x) < 12 && Math.abs(y - h.y) < 12) return h.name;
-  }
-  return null;
-}
-
-function resizeCropRect(handle, x, y, prevX, prevY) {
-  const dx = x - prevX;
-  const dy = y - prevY;
-  const minSize = 10;
-  if (handle === 'tl') {
-    cropRect.x = Math.min(cropRect.x + dx, cropRect.x + cropRect.w - minSize);
-    cropRect.y = Math.min(cropRect.y + dy, cropRect.y + cropRect.h - minSize);
-    cropRect.w = Math.max(minSize, cropRect.w - dx);
-    cropRect.h = Math.max(minSize, cropRect.h - dy);
-  } else if (handle === 'tr') {
-    cropRect.y = Math.min(cropRect.y + dy, cropRect.y + cropRect.h - minSize);
-    cropRect.w = Math.max(minSize, cropRect.w + dx);
-    cropRect.h = Math.max(minSize, cropRect.h - dy);
-  } else if (handle === 'bl') {
-    cropRect.x = Math.min(cropRect.x + dx, cropRect.x + cropRect.w - minSize);
-    cropRect.w = Math.max(minSize, cropRect.w - dx);
-    cropRect.h = Math.max(minSize, cropRect.h + dy);
-  } else if (handle === 'br') {
-    cropRect.w = Math.max(minSize, cropRect.w + dx);
-    cropRect.h = Math.max(minSize, cropRect.h + dy);
-  }
-  clampCropRect();
-}
-
-function clampCropRect() {
-  const w = canvasOverlay.width;
-  const h = canvasOverlay.height;
-  cropRect.x = Math.max(0, Math.min(cropRect.x, w - cropRect.w));
-  cropRect.y = Math.max(0, Math.min(cropRect.y, h - cropRect.h));
-  cropRect.w = Math.min(cropRect.w, w - cropRect.x);
-  cropRect.h = Math.min(cropRect.h, h - cropRect.y);
-}
-
-function drawCropOverlay() {
-  const ctx = canvasOverlay.getContext('2d');
-  const w = canvasOverlay.width;
-  const h = canvasOverlay.height;
-  ctx.clearRect(0, 0, w, h);
-
-  if (!cropRect) return;
-
-  // Darken outside crop area
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-  ctx.fillRect(0, 0, w, cropRect.y);                           // top
-  ctx.fillRect(0, cropRect.y + cropRect.h, w, h);              // bottom
-  ctx.fillRect(0, cropRect.y, cropRect.x, cropRect.h);         // left
-  ctx.fillRect(cropRect.x + cropRect.w, cropRect.y, w, cropRect.h); // right
-
-  // Border
-  ctx.strokeStyle = '#6c8cff';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(cropRect.x, cropRect.y, cropRect.w, cropRect.h);
-
-  // Corner handles
-  const handles = [
-    [cropRect.x, cropRect.y],
-    [cropRect.x + cropRect.w, cropRect.y],
-    [cropRect.x, cropRect.y + cropRect.h],
-    [cropRect.x + cropRect.w, cropRect.y + cropRect.h]
-  ];
-  ctx.fillStyle = '#fff';
-  ctx.strokeStyle = '#6c8cff';
-  ctx.lineWidth = 1.5;
-  handles.forEach(([hx, hy]) => {
-    ctx.beginPath();
-    ctx.arc(hx, hy, 6, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-  });
-}
-
-btnApplyCrop.addEventListener('click', () => {
-  if (!cropRect || !currentEditImageData) return;
-  if (cropRect.w < 10 || cropRect.h < 10) {
-    toast('裁剪区域太小'); return;
-  }
-
-  const sw = currentEditImageData.width;
-  const sh = currentEditImageData.height;
-
-  // Create new image from crop rect
-  const srcCanvas = document.createElement('canvas');
-  srcCanvas.width = sw;
-  srcCanvas.height = sh;
-  srcCanvas.getContext('2d').putImageData(currentEditImageData, 0, 0);
-
-  const outCanvas = document.createElement('canvas');
-  outCanvas.width = cropRect.w;
-  outCanvas.height = cropRect.h;
-  const outCtx = outCanvas.getContext('2d');
-  outCtx.drawImage(srcCanvas, cropRect.x, cropRect.y, cropRect.w, cropRect.h, 0, 0, cropRect.w, cropRect.h);
-
-  currentEditImageData = outCtx.getImageData(0, 0, cropRect.w, cropRect.h);
-  processedDataUrl = outCanvas.toDataURL('image/png');
-  btnDownload.disabled = false;
-
-  // Reset edit canvas with new size
-  const cw = cropRect.w, ch = cropRect.h;
-  const maxW = Math.min(window.innerWidth * 0.9, 1200);
-  const maxH = window.innerHeight * 0.55;
-  const scale = Math.min(maxW / cw, maxH / ch, 1);
-  const dw = Math.round(cw * scale);
-  const dh = Math.round(ch * scale);
-
-  canvasEdit.width = cw;
-  canvasEdit.height = ch;
-  canvasEdit.style.width = dw + 'px';
-  canvasEdit.style.height = dh + 'px';
-  canvasEdit.getContext('2d').putImageData(currentEditImageData, 0, 0);
-
-  canvasOverlay.width = cw;
-  canvasOverlay.height = ch;
-  canvasOverlay.style.width = dw + 'px';
-  canvasOverlay.style.height = dh + 'px';
-  canvasOverlay._scaleX = cw / dw;
-  canvasOverlay._scaleY = ch / dh;
-  canvasOverlay.getContext('2d').clearRect(0, 0, cw, ch);
-  cropRect = null;
-  undoStack = [];
-
-  toast(`已裁剪为 ${cw} × ${ch}`);
-});
-
-btnCancelCrop.addEventListener('click', () => {
-  cropRect = null;
-  drawCropOverlay();
-  toast('已取消裁剪选择');
-});
 
 // ============ Preset selection ============
 presetCards.forEach(card => {
@@ -1205,7 +884,6 @@ btnProcess.addEventListener('click', async () => {
     );
     undoStack = [];
     brushMask = null;
-    cropRect = null;
     showModeTabs();
 
     toast(`${preset.label}处理完成，拖动滑块对比`);
@@ -1713,7 +1391,6 @@ btnReset.addEventListener('click', () => {
   currentEditImageData = null;
   undoStack = [];
   brushMask = null;
-  cropRect = null;
   uploadZone.classList.remove('has-image');
   uploadZone.innerHTML = `
     <div class="icon">&#x1F4C1;</div>
@@ -1727,7 +1404,6 @@ btnReset.addEventListener('click', () => {
   placeholder.style.display = 'block';
   modeTabs.style.display = 'none';
   toolWatermark.style.display = 'none';
-  toolCrop.style.display = 'none';
 });
 
 // ============ Toast ============
