@@ -301,8 +301,8 @@
           <div class="level-badge">3</div>
           <div class="info">
             <div class="name">强力</div>
-            <div class="methods">DCT 滤波 + 小波滤波 + 高斯模糊</div>
-            <div class="impact">画质中等损失</div>
+            <div class="methods">标准基础上 + 轻度DCT频域滤波</div>
+            <div class="impact">画质轻微损失</div>
           </div>
           <div class="check"></div>
         </div>
@@ -310,8 +310,8 @@
           <div class="level-badge">4</div>
           <div class="info">
             <div class="name">极限</div>
-            <div class="methods">全部 7 种方法 · 覆盖所有水印类型</div>
-            <div class="impact">画质明显损失</div>
+            <div class="methods">强力基础上 + 轻度小波滤波</div>
+            <div class="impact">画质中等损失</div>
           </div>
           <div class="check"></div>
         </div>
@@ -397,25 +397,23 @@ const PRESETS = {
   },
   strong: {
     label: '强力',
-    desc: 'DCT 滤波 + 小波滤波 + 高斯模糊',
+    desc: '标准基础上 + 轻度DCT频域滤波',
     steps: [
-      { method: 'recompress', value: 78 },
-      { method: 'blur', value: 1.5 },
-      { method: 'dct', value: 35 },
-      { method: 'wavelet', value: 30 }
+      { method: 'recompress', value: 82 },
+      { method: 'blur', value: 1.0 },
+      { method: 'rotate', value: 0.5 },
+      { method: 'dct', value: 75 }
     ]
   },
   extreme: {
     label: '极限',
-    desc: '全部 7 种方法叠加，覆盖所有水印类型',
+    desc: '强力基础上 + 轻度小波滤波',
     steps: [
-      { method: 'recompress', value: 72 },
-      { method: 'rotate', value: 1.0 },
-      { method: 'resize', value: 97 },
-      { method: 'blur', value: 2.0 },
-      { method: 'dct', value: 45 },
-      { method: 'wavelet', value: 50 },
-      { method: 'noise', value: 4 }
+      { method: 'recompress', value: 80 },
+      { method: 'blur', value: 1.0 },
+      { method: 'rotate', value: 0.5 },
+      { method: 'dct', value: 70 },
+      { method: 'wavelet', value: 18 }
     ]
   }
 };
